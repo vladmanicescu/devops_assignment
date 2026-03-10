@@ -334,7 +334,158 @@ Kubernetes
 ```
 """
 
-output = "/mnt/data/README.md"
-pypandoc.convert_text(text, "md", format="md", outputfile=output, extra_args=['--standalone'])
+### Provision infrastructure
 
-output
+Create the infrastructure using Terraform:
+
+```bash
+make infra
+```
+
+This will typically run:
+
+```bash
+terraform init
+terraform plan
+terraform apply
+```
+
+---
+
+### Configure Kubernetes access
+
+Configure access to the Kubernetes cluster:
+
+```bash
+make kubeconfig
+```
+
+---
+
+### Install NFS dynamic storage
+
+Install the Kubernetes NFS provisioner:
+
+```bash
+make install-nfs
+```
+
+Verify installation:
+
+```bash
+kubectl get storageclass
+kubectl get pods -n nfs-provisioner
+```
+
+---
+
+### Install GitLab
+
+Install and configure the GitLab server:
+
+```bash
+make install-gitlab
+```
+
+This runs the Ansible playbook responsible for:
+
+- installing GitLab
+- configuring the container registry
+- setting up the root account
+
+---
+
+### Bootstrap GitLab
+
+Bootstrap GitLab by creating required resources:
+
+```bash
+make bootstrap-gitlab
+```
+
+This step:
+
+- ensures the `root` user exists
+- creates a Personal Access Token
+- creates required GitLab projects
+
+---
+
+### Push repositories to GitLab
+
+Push the application and Helm chart repositories to GitLab:
+
+```bash
+make push-gitlab GITLAB_IP=<gitlab-ip> GITLAB_TOKEN=<token>
+```
+
+Example:
+
+```bash
+make push-gitlab GITLAB_IP=3.67.91.250 GITLAB_TOKEN=glpat-xxxx
+```
+
+This command pushes:
+
+- `python-auth-app`
+- `python-auth-k8s`
+
+to the GitLab instance.
+
+---
+
+### Build and push Docker image
+
+The Docker image is built and pushed automatically through the GitLab CI pipeline when code is pushed.
+
+Pipeline steps:
+
+```
+git push
+   ↓
+GitLab CI
+   ↓
+Docker build
+   ↓
+Push image to GitLab Container Registry
+```
+
+---
+
+### Deploy application to Kubernetes
+
+Deploy the application using Helm:
+
+```bash
+make deploy
+```
+
+This uses the Helm chart located in:
+
+```
+app/python-auth-k8s
+```
+
+---
+
+### Full workflow
+
+A typical workflow for setting up the entire environment looks like this:
+
+```bash
+make infra
+make kubeconfig
+make install-nfs
+make install-gitlab
+make bootstrap-gitlab
+
+make push-gitlab GITLAB_IP=<gitlab-ip> GITLAB_TOKEN=<token>
+```
+
+After this step, the CI/CD pipeline automatically builds and pushes the Docker image.
+"""
+
+path = "/mnt/data/makefile_readme_section.md"
+pypandoc.convert_text(text, "md", format="md", outputfile=path, extra_args=["--standalone"])
+
+path
