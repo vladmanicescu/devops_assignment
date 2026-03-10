@@ -288,3 +288,252 @@ make all-k8s
 | fmt | Format Terraform |
 | validate | Validate Terraform |
 
+---
+
+# Infrastructure Provisioning
+
+```bash
+terraform init
+terraform plan
+terraform apply
+```
+
+Important outputs:
+
+- Kubernetes control plane IP
+- GitLab server IP
+- SSH private key
+
+---
+
+# Download kubeconfig
+
+
+
+```bash
+scp ec2-user@<control-plane-ip>:/etc/kubernetes/admin.conf ./kubeconfig
+export KUBECONFIG=$(pwd)/kubeconfig
+```
+
+Verify:
+
+```bash
+kubectl get nodes
+kubectl get pods -A
+```
+
+---
+
+# Install NFS Storage
+
+```bash
+helm repo add nfs-subdir-external-provisioner https://kubernetes-sigs.github.io/nfs-subdir-external-provisioner/
+helm repo update
+```
+
+Install:
+
+```bash
+helm install nfs-client \
+nfs-subdir-external-provisioner/nfs-subdir-external-provisioner \
+--namespace nfs-provisioner \
+--create-namespace
+```
+
+Verify:
+
+```bash
+kubectl get pods -n nfs-provisioner
+kubectl get storageclass
+```
+
+---
+
+# Install GitLab
+
+```bash
+ansible-playbook -i inventory.ini gitlab.yaml
+```
+
+Verify services:
+
+```bash
+sudo gitlab-ctl status
+sudo gitlab-ctl tail
+```
+
+Open:
+
+```
+http://<gitlab-ip>
+```
+
+---
+
+# Fix GitLab Root Login
+
+```bash
+sudo gitlab-rake "gitlab:password:reset[root]"
+```
+
+Verify:
+
+```bash
+sudo gitlab-rails runner "puts User.pluck(:username)"
+```
+
+---
+
+# Bootstrap GitLab
+
+```bash
+ansible-playbook gitlab-bootstrap.yaml
+```
+
+Projects created:
+
+- python-auth-app
+- python-auth-k8s
+
+---
+
+# Install GitLab Runner
+
+```bash
+sudo dnf install gitlab-runner -y
+sudo systemctl enable --now gitlab-runner
+```
+
+Register:
+
+```bash
+sudo gitlab-runner register \
+--url http://<gitlab-ip> \
+--executor shell \
+--token <RUNNER_TOKEN>
+```
+
+Verify:
+
+```bash
+sudo gitlab-runner verify
+```
+
+---
+
+# Install Docker on GitLab Server
+
+```bash
+sudo dnf install docker -y
+sudo systemctl enable --now docker
+sudo usermod -aG docker gitlab-runner
+sudo systemctl restart gitlab-runner
+```
+
+Verify:
+
+```bash
+docker info
+```
+
+---
+
+# Configure Docker Insecure Registry
+
+Edit:
+
+```
+/etc/docker/daemon.json
+```
+
+```json
+{
+"insecure-registries": ["<gitlab-ip>:5050"]
+}
+```
+
+Restart Docker:
+
+```bash
+sudo systemctl restart docker
+```
+
+---
+
+# Test Registry Login
+
+```bash
+docker login http://<gitlab-ip>:5050
+```
+
+---
+
+# Fix CI Job Token Error
+
+```bash
+sudo gitlab-rails runner 'key = OpenSSL::PKey::RSA.new(2048).to_pem; s = ApplicationSetting.current; s.ci_job_token_signing_key = key; s.save!'
+```
+
+Restart GitLab:
+
+```bash
+sudo gitlab-ctl restart
+```
+
+---
+
+# GitLab CI Pipeline
+
+```yaml
+stages:
+- build
+
+build:
+stage: build
+script:
+- docker login http://<gitlab-ip>:5050 -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD
+- docker build -t <gitlab-ip>:5050/root/python-auth-app:$CI_COMMIT_SHORT_SHA .
+- docker push <gitlab-ip>:5050/root/python-auth-app:$CI_COMMIT_SHORT_SHA
+```
+
+---
+
+# Deploy with Helm
+
+```bash
+helm install auth-app app/python-auth-k8s
+```
+
+Verify:
+
+```bash
+kubectl get pods
+kubectl get svc
+```
+
+---
+
+Push repositories:
+
+```bash
+make push-gitlab GITLAB_IP=<gitlab-ip> GITLAB_TOKEN=<token>
+```
+
+---
+
+# CI/CD Flow
+
+```
+git push
+   ↓
+GitLab CI
+   ↓
+Docker build
+   ↓
+GitLab Container Registry
+   ↓
+Helm deployment
+   ↓
+Kubernetes
+```
+"""
