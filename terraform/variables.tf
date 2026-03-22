@@ -13,13 +13,13 @@ variable "aws_profile" {
 variable "project_name" {
   description = "Project name prefix used for tagging"
   type        = string
-  default     = "devops-assignment"
+  default     = "pocket"
 }
 
 variable "key_name" {
   description = "Name of the generated AWS key pair"
   type        = string
-  default     = "k8s-assignment-key"
+  default     = "k8s-pocket-key"
 }
 
 variable "vpc_cidr" {

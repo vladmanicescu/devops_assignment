@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pocket.local/schemas/platform/v1/platform-config",
+  "title": "Platform configuration",
+  "description": "Single source of truth for cloud provider, Kubernetes backend, and platform services (Git, storage, etc.).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "provider", "kubernetes", "platform"],
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "platform.dev/v1",
+      "description": "Schema version; bump only when breaking changes require migration."
+    },
+    "kind": {
+      "type": "string",
+      "const": "PlatformConfig",
+      "description": "Document type discriminator."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Logical name for this stack (used in tags, kube contexts, etc.)."
+        },
+        "environment": {
+          "type": "string",
+          "description": "Optional label e.g. dev, staging, prod."
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Arbitrary key/value labels applied to cloud resources where supported."
+        }
+      }
+    },
+    "provider": {
+      "type": "string",
+      "enum": ["aws", "azure"],
+      "description": "Cloud provider. Only aws is implemented initially; azure reserved for future modules."
+    },
+    "kubernetes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "version"],
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["vanilla", "eks", "k3d", "local"],
+          "description": "vanilla=self-managed kubeadm-style; eks=AWS EKS; k3d/local=dev clusters (no cloud infra or minimal)."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$",
+          "description": "Kubernetes minor version, e.g. 1.33."
+        },
+        "network": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "vpc_cidr": { "type": "string", "description": "IPv4 CIDR for VPC/VNet when created by tooling." },
+            "subnet_cidr": { "type": "string", "description": "Primary subnet CIDR when applicable." },
+            "availability_zone": { "type": "string", "description": "AZ for zonal resources (e.g. AWS)." }
+          }
+        },
+        "k3d": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "When backend is k3d: cluster name, port mappings, agent count, etc."
+        },
+        "local": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "When backend is local: kind/minikube profile options."
+        },
+        "aws": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "AWS-specific settings; required when provider is aws.",
+          "properties": {
+            "region": { "type": "string", "minLength": 1 },
+            "profile": { "type": "string", "description": "AWS CLI profile name for credentials." },
+            "vanilla": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Self-managed cluster on EC2 (kubeadm-style).",
+              "properties": {
+                "key_name": { "type": "string", "description": "EC2 key pair name (may be generated)." },
+                "instance_type": { "type": "string" },
+                "allowed_ssh_cidrs": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "CIDRs allowed for SSH, API, HTTP/S to public endpoints."
+                },
+                "nodes": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/awsVanillaNode" },
+                  "description": "Control plane and worker definitions (mirrors vm_definitions)."
+                },
+                "nfs_instance": { "$ref": "#/$defs/awsNfsHost" },
+                "gitlab_instance": { "$ref": "#/$defs/awsGitLabHost" }
+              }
+            },
+            "eks": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "EKS-specific settings (placeholders for future implementation).",
+              "properties": {
+                "cluster_name": { "type": "string" },
+                "endpoint_public_access": { "type": "boolean" }
+              }
+            }
+          }
+        },
+        "azure": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Azure-specific settings; reserved for future AKS and networking modules."
+        }
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Services installed after a kube API exists (Helm, operators, forge).",
+      "properties": {
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "class": { "type": "string", "description": "IngressClass name, e.g. nginx, traefik." }
+          }
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "nfs": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "provisioner_chart": { "type": "string", "description": "Helm chart reference or chart name." },
+                "server_host": { "type": "string", "description": "NFS server host or IP when static." },
+                "export_path": { "type": "string" }
+              }
+            },
+            "default_storage_class": { "type": "string", "description": "StorageClass name apps should use." }
+          }
+        },
+        "gitlab": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "install_mode": {
+              "type": "string",
+              "enum": ["omnibus_vm", "helm", "external"],
+              "description": "omnibus_vm=Ansible on dedicated EC2; helm=in-cluster; external=use existing URL only."
+            },
+            "bootstrap": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "projects": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Repository names to create."
+                }
+              }
+            }
+          }
+        },
+        "applications": {
+          "type": "array",
+          "description": "Optional Helm releases for sample or internal apps.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "chart"],
+            "properties": {
+              "name": { "type": "string" },
+              "namespace": { "type": "string" },
+              "chart": { "type": "string", "description": "Path or chart ref, e.g. ./app/python-auth-k8s." },
+              "values_file": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "awsVanillaNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "hostname", "private_ip", "extra_disk_size"],
+      "properties": {
+        "name": { "type": "string" },
+        "hostname": { "type": "string" },
+        "private_ip": { "type": "string" },
+        "gateway": { "type": "string" },
+        "extra_disk_size": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "awsNfsHost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instance_type": { "type": "string" },
+        "private_ip": { "type": "string" },
+        "root_volume_gb": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "awsGitLabHost": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instance_type": { "type": "string" },
+        "private_ip": { "type": "string" },
+        "root_volume_gb": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}
