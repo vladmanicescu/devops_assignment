@@ -1,0 +1,18 @@
+nfs:
+  server: 172.31.1.20
+  path: /srv/nfs/k8s
+
+storageClass:
+  create: true
+  name: nfs-client
+  defaultClass: false
+  reclaimPolicy: Retain
+  archiveOnDelete: false
+  accessModes: ReadWriteMany
+
+replicaCount: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi

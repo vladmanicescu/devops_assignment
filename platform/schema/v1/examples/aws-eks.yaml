@@ -1,0 +1,35 @@
+# Example PlatformConfig — EKS on AWS (Terraform: providers/aws/eks/terraform).
+# Validate against platform/schema/v1/platform-config.schema.json
+
+apiVersion: platform.dev/v1
+kind: PlatformConfig
+
+metadata:
+  name: pocket
+  environment: lab
+  labels:
+    team: platform
+
+provider: aws
+
+kubernetes:
+  backend: eks
+  version: "1.31"
+  network:
+    vpc_cidr: 10.40.0.0/16
+    availability_zone: eu-central-1a
+  aws:
+    region: eu-central-1
+    profile: default
+    eks:
+      cluster_name: pocket-eks
+      endpoint_public_access: true
+
+platform:
+  ingress:
+    class: nginx
+  storage:
+    nfs:
+      enabled: false
+  gitlab:
+    enabled: false

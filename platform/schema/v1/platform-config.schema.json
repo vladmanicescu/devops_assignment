@@ -108,10 +108,15 @@
             "eks": {
               "type": "object",
               "additionalProperties": true,
-              "description": "EKS-specific settings (placeholders for future implementation).",
+              "description": "EKS: see providers/aws/eks/terraform and examples/aws-eks.yaml.",
               "properties": {
                 "cluster_name": { "type": "string" },
-                "endpoint_public_access": { "type": "boolean" }
+                "endpoint_public_access": { "type": "boolean" },
+                "endpoint_private_access": { "type": "boolean" },
+                "vpc_cidr": { "type": "string" },
+                "node_instance_types": { "type": "array", "items": { "type": "string" } },
+                "node_desired_size": { "type": "integer" },
+                "single_nat_gateway": { "type": "boolean" }
               }
             }
           }

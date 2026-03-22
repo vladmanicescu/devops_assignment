@@ -1,12 +1,13 @@
 TERRAFORM_DIR=providers/aws/vanilla/terraform
 ANSIBLE_DIR=providers/aws/vanilla/ansible
+EKS_TERRAFORM_DIR=providers/aws/eks/terraform
 
 INVENTORY=$(ANSIBLE_DIR)/inventory.ini
 CONFIG_PLAYBOOK=$(ANSIBLE_DIR)/playbook.yml
 NFS_PLAYBOOK=$(ANSIBLE_DIR)/nfs.yaml
 CLUSTER_PLAYBOOK=$(ANSIBLE_DIR)/k8s-cluster.yml
 
-.PHONY: infra config nfs cluster config-infra all-k8s test test-nfs destroy fmt validate
+.PHONY: infra config nfs cluster config-infra all-k8s test test-nfs destroy fmt validate infra-eks destroy-eks fmt-eks validate-eks
 
 infra:
 	@echo "==> Provisioning infrastructure with Terraform"
@@ -69,3 +70,20 @@ fmt:
 validate:
 	@echo "==> Validating Terraform configuration"
 	cd $(TERRAFORM_DIR) && terraform validate
+
+infra-eks:
+	@echo "==> Provisioning EKS (providers/aws/eks/terraform)"
+	cd $(EKS_TERRAFORM_DIR) && terraform init
+	cd $(EKS_TERRAFORM_DIR) && terraform apply -auto-approve
+
+destroy-eks:
+	@echo "==> Destroying EKS stack"
+	cd $(EKS_TERRAFORM_DIR) && terraform destroy -auto-approve
+
+fmt-eks:
+	@echo "==> Formatting EKS Terraform"
+	cd $(EKS_TERRAFORM_DIR) && terraform fmt -recursive
+
+validate-eks:
+	@echo "==> Validating EKS Terraform"
+	cd $(EKS_TERRAFORM_DIR) && terraform validate

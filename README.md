@@ -21,7 +21,8 @@ The Makefile uses the following directories:
 
 | Variable | Path | Description |
 |--------|--------|--------|
-| TERRAFORM_DIR | providers/aws/vanilla/terraform/ | Terraform (AWS vanilla k8s) |
+| TERRAFORM_DIR | providers/aws/vanilla/terraform/ | Terraform (AWS vanilla k8s on EC2) |
+| EKS_TERRAFORM_DIR | providers/aws/eks/terraform/ | Terraform (managed EKS + VPC) |
 | ANSIBLE_DIR | providers/aws/vanilla/ansible/ | Ansible playbooks and inventory |
 
 Important files:
@@ -53,6 +54,17 @@ cd providers/aws/vanilla/terraform && terraform apply -auto-approve
 
 ---
 
+## make infra-eks
+
+Provisions **Amazon EKS** (managed Kubernetes) in a dedicated VPC. Code lives under `providers/aws/eks/terraform` (see `providers/aws/eks/README.md`). After apply, run `terraform output configure_kubeconfig` from that directory and execute the printed `aws eks update-kubeconfig` command.
+
+Commands:
+
+cd providers/aws/eks/terraform && terraform init  
+cd providers/aws/eks/terraform && terraform apply -auto-approve
+
+---
+
 ## make destroy
 
 Destroys all Terraform-managed infrastructure.
@@ -60,6 +72,16 @@ Destroys all Terraform-managed infrastructure.
 Command:
 
 cd providers/aws/vanilla/terraform && terraform destroy -auto-approve
+
+---
+
+## make destroy-eks
+
+Destroys the EKS stack (same directory as `make infra-eks`).
+
+Command:
+
+cd providers/aws/eks/terraform && terraform destroy -auto-approve
 
 ---
 
@@ -287,6 +309,10 @@ make all-k8s
 | destroy | Destroy infrastructure |
 | fmt | Format Terraform |
 | validate | Validate Terraform |
+| infra-eks | Provision EKS (`providers/aws/eks/terraform`) |
+| destroy-eks | Destroy EKS stack |
+| fmt-eks | Format EKS Terraform |
+| validate-eks | Validate EKS Terraform |
 
 ---
 
