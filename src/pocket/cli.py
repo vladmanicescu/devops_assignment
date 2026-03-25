@@ -19,6 +19,7 @@ import click
 from pocket.config import ConfigError, load, PlatformConfig
 from pocket.backends.aws import vanilla as vanilla_backend
 from pocket.backends.aws import eks as eks_backend
+from pocket.backends.aws import gitlab as gitlab_backend
 
 # Repo root is three levels above this file (src/pocket/cli.py → repo root)
 _REPO_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
@@ -190,6 +191,48 @@ def destroy(ctx: click.Context) -> None:
     cfg = _load_or_exit(ctx)
     target = _make_target(cfg, "destroy")
     _run_make(target)
+
+
+# ---------------------------------------------------------------------------
+# gitlab
+# ---------------------------------------------------------------------------
+
+@main.group()
+@click.pass_context
+def gitlab(ctx: click.Context) -> None:
+    """GitLab installation and management on EKS."""
+    pass
+
+
+@gitlab.command("install")
+@click.pass_context
+def gitlab_install(ctx: click.Context) -> None:
+    """Install GitLab via Helm on the running EKS cluster."""
+    cfg = _load_or_exit(ctx)
+    if cfg.kubernetes.backend != "eks":
+        click.echo(
+            click.style("✗ 'pocket gitlab install' only supports the eks backend.", fg="red"),
+            err=True,
+        )
+        sys.exit(1)
+    gitlab_backend.install(cfg)
+
+
+@gitlab.command("url")
+@click.pass_context
+def gitlab_url(ctx: click.Context) -> None:
+    """Print the GitLab URL."""
+    cfg = _load_or_exit(ctx)
+    click.echo(gitlab_backend.get_url(cfg))
+
+
+@gitlab.command("uninstall")
+@click.confirmation_option(prompt="This will remove GitLab from the cluster. Are you sure?")
+@click.pass_context
+def gitlab_uninstall(ctx: click.Context) -> None:
+    """Uninstall GitLab and the ingress controller from the cluster."""
+    cfg = _load_or_exit(ctx)
+    gitlab_backend.uninstall(cfg)
 
 
 # ---------------------------------------------------------------------------

@@ -145,7 +145,31 @@ class GitLabBootstrap(BaseModel):
 class GitLab(BaseModel):
     enabled: Optional[bool] = None
     install_mode: Optional[Literal["omnibus_vm", "helm", "external"]] = None
+    hostname: Optional[str] = None
+    tls: Optional[bool] = None
+    tls_mode: Optional[Literal["letsencrypt", "self_signed"]] = None
+    route53_zone_id: Optional[str] = None
     bootstrap: Optional[GitLabBootstrap] = None
+
+    @property
+    def effective_tls(self) -> bool:
+        """TLS is active when tls: true is set.
+        self_signed mode works without a hostname; letsencrypt requires one."""
+        if not self.tls:
+            return False
+        if self.tls_mode == "self_signed":
+            return True
+        return bool(self.hostname)  # letsencrypt needs a resolvable hostname
+
+    @property
+    def effective_tls_mode(self) -> str:
+        """Resolved TLS mode — defaults to letsencrypt when tls_mode is omitted."""
+        return self.tls_mode or "letsencrypt"
+
+    @property
+    def effective_route53(self) -> bool:
+        """Route 53 automation is only active when both hostname and zone ID are set."""
+        return bool(self.hostname and self.route53_zone_id)
 
 
 class Application(BaseModel):

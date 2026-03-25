@@ -24,6 +24,9 @@ kubernetes:
     eks:
       cluster_name: pocket-eks
       endpoint_public_access: true
+      node_instance_types:
+        - t3.large
+      node_desired_size: 2
 
 platform:
   ingress:
@@ -34,7 +37,3 @@ platform:
   gitlab:
     enabled: true
     install_mode: helm
-    # hostname: gitlab.example.com        # optional — omit to use the NLB auto-hostname
-    # tls: true                           # optional — enable TLS via cert-manager
-    # tls_mode: letsencrypt               # letsencrypt (default, requires hostname+DNS) | self_signed (dev, no domain needed)
-    # route53_zone_id: Z1234567890ABC     # optional — auto-creates CNAME in Route 53 (requires hostname)

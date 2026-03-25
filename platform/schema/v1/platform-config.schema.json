@@ -163,6 +163,23 @@
               "enum": ["omnibus_vm", "helm", "external"],
               "description": "omnibus_vm=Ansible on dedicated EC2; helm=in-cluster; external=use existing URL only."
             },
+            "hostname": {
+              "type": "string",
+              "description": "GitLab hostname (e.g. gitlab.example.com). Omit to use the NLB auto-hostname (no domain required)."
+            },
+            "tls": {
+              "type": "boolean",
+              "description": "Enable TLS via cert-manager. Mode is controlled by tls_mode."
+            },
+            "tls_mode": {
+              "type": "string",
+              "enum": ["letsencrypt", "self_signed"],
+              "description": "letsencrypt (default) = Let's Encrypt via HTTP-01, requires hostname + DNS. self_signed = cert-manager issues a local CA cert, works with any hostname including NLB auto-hostname."
+            },
+            "route53_zone_id": {
+              "type": "string",
+              "description": "Route 53 hosted zone ID (e.g. Z1234567890ABC). When set, pocket will automatically create/update the CNAME record for hostname → NLB. Requires hostname to be set."
+            },
             "bootstrap": {
               "type": "object",
               "additionalProperties": false,
