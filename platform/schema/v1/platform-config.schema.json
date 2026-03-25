@@ -91,11 +91,7 @@
               "properties": {
                 "key_name": { "type": "string", "description": "EC2 key pair name (may be generated)." },
                 "instance_type": { "type": "string" },
-                "allowed_ssh_cidrs": {
-                  "type": "array",
-                  "items": { "type": "string" },
-                  "description": "CIDRs allowed for SSH, API, HTTP/S to public endpoints."
-                },
+                "security_groups": { "$ref": "#/$defs/vanillaSecurityGroups" },
                 "nodes": {
                   "type": "array",
                   "items": { "$ref": "#/$defs/awsVanillaNode" },
@@ -200,6 +196,28 @@
     }
   },
   "$defs": {
+    "vanillaSecurityGroups": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "CIDRs applied to each security-group rule; omit a key to keep the Terraform default.",
+      "properties": {
+        "ssh_cidrs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "CIDRs allowed on port 22 (SSH to all nodes)."
+        },
+        "k8s_api_cidrs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "CIDRs allowed on port 6443 (Kubernetes API server)."
+        },
+        "http_cidrs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "CIDRs allowed on ports 80 and 443 (ingress / GitLab web)."
+        }
+      }
+    },
     "awsVanillaNode": {
       "type": "object",
       "additionalProperties": false,

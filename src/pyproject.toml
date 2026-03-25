@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "pocket"
+version = "0.1.0"
+description = "Unified CLI to materialise Terraform and Ansible configs from a single platform.yaml"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "pyyaml>=6.0",
+    "jsonschema>=4.21",
+    "jinja2>=3.1",
+    "pydantic>=2.6",
+]
+
+[project.scripts]
+pocket = "pocket.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pocket*"]
