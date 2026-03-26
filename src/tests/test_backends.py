@@ -33,7 +33,7 @@ from pocket.backends.aws import vanilla as vanilla_backend
 from pocket.backends.aws import eks as eks_backend
 from pocket.config import (
     AwsConfig, EksConfig, Kubernetes, Metadata, Network,
-    PlatformConfig, PlatformServices, SecurityGroups,
+    PlatformConfig, PlatformServices, SecurityGroups, Vault,
     VanillaConfig, VanillaNode, NfsHost, GitLabHost,
 )
 
@@ -61,11 +61,17 @@ def _vanilla_cfg(vanilla: VanillaConfig | None = None, network: Network | None =
 
 
 def _eks_cfg(eks: EksConfig | None = None, network: Network | None = None,
-             profile: str | None = None) -> PlatformConfig:
+             profile: str | None = None, vault: Vault | None = None) -> PlatformConfig:
     aws = AwsConfig(region="eu-central-1", profile=profile, eks=eks)
-    cfg = _base_cfg(aws=aws, network=network)
-    cfg.kubernetes.backend = "eks"
-    return cfg
+    platform = PlatformServices(vault=vault) if vault is not None else PlatformServices()
+    return PlatformConfig(
+        apiVersion="platform.dev/v1",
+        kind="PlatformConfig",
+        metadata=Metadata(name="test"),
+        provider="aws",
+        kubernetes=Kubernetes(backend="eks", version="1.31", aws=aws, network=network),
+        platform=platform,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +258,7 @@ class TestEksRender:
         assert 'aws_region = "eu-central-1"' in out
         assert 'project_name = "test"' in out
         assert 'cluster_version = "1.31"' in out
+        assert "vault_enabled = true" in out
 
     def test_profile_included_when_set(self):
         out = eks_backend.render(_eks_cfg(profile="myprofile"))
@@ -302,6 +309,18 @@ class TestEksRender:
         eks = EksConfig(node_desired_size=3)
         out = eks_backend.render(_eks_cfg(eks=eks))
         assert "node_desired_size = 3" in out
+
+    def test_vault_disabled(self):
+        out = eks_backend.render(_eks_cfg(vault=Vault(enabled=False)))
+        assert "vault_enabled = false" in out
+
+    def test_vault_replicas_and_storage(self):
+        out = eks_backend.render(
+            _eks_cfg(vault=Vault(enabled=True, replicas=3, data_storage_size="20Gi"))
+        )
+        assert "vault_enabled = true" in out
+        assert "vault_replicas = 3" in out
+        assert 'vault_data_storage_size = "20Gi"' in out
 
     def test_optional_fields_absent_when_not_set(self):
         out = eks_backend.render(_eks_cfg())

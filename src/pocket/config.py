@@ -137,6 +137,15 @@ class Ingress(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class GitLabRunner(BaseModel):
+    enabled: Optional[bool] = None
+    concurrent: Optional[int] = None
+    job_cpu_request: Optional[str] = None
+    job_memory_request: Optional[str] = None
+    job_cpu_limit: Optional[str] = None
+    job_memory_limit: Optional[str] = None
+
+
 class GitLabBootstrap(BaseModel):
     enabled: Optional[bool] = None
     projects: Optional[list[str]] = None
@@ -149,6 +158,7 @@ class GitLab(BaseModel):
     tls: Optional[bool] = None
     tls_mode: Optional[Literal["letsencrypt", "self_signed"]] = None
     route53_zone_id: Optional[str] = None
+    runner: Optional[GitLabRunner] = None
     bootstrap: Optional[GitLabBootstrap] = None
 
     @property
@@ -179,9 +189,18 @@ class Application(BaseModel):
     values_file: Optional[str] = None
 
 
+class Vault(BaseModel):
+    """HashiCorp Vault on EKS — Terraform (KMS + IRSA + Helm)."""
+
+    enabled: Optional[bool] = None
+    replicas: Optional[int] = None
+    data_storage_size: Optional[str] = None
+
+
 class PlatformServices(BaseModel):
     ingress: Optional[Ingress] = None
     storage: Optional[Storage] = None
+    vault: Optional[Vault] = None
     gitlab: Optional[GitLab] = None
     applications: Optional[list[Application]] = None
 

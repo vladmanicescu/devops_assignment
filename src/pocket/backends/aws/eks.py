@@ -1,11 +1,14 @@
 """
 EKS backend — renders providers/aws/eks/terraform/terraform.tfvars
-from a validated PlatformConfig.
+from a validated PlatformConfig, and can run Terraform in that directory
+(EKS + CSI + Vault in one state).
 """
 
 from __future__ import annotations
 
 import pathlib
+import subprocess
+import sys
 
 from pocket.config import PlatformConfig
 from pocket.backends.aws import hcl
@@ -14,6 +17,32 @@ _TFVARS_PATH = (
     pathlib.Path(__file__).parent.parent.parent.parent.parent
     / "providers" / "aws" / "eks" / "terraform" / "terraform.tfvars"
 )
+
+
+def terraform_directory() -> pathlib.Path:
+    """Directory containing main.tf and terraform.tfvars for the EKS stack."""
+    return _TFVARS_PATH.parent
+
+
+def run_terraform_init_apply() -> None:
+    """terraform init && terraform apply -auto-approve (cluster, Vault, CSI, …)."""
+    d = terraform_directory()
+    for cmd in (["terraform", "init"], ["terraform", "apply", "-auto-approve"]):
+        r = subprocess.run(cmd, cwd=d, check=False)
+        if r.returncode != 0:
+            sys.exit(r.returncode)
+
+
+def run_terraform_destroy() -> None:
+    """terraform destroy -auto-approve."""
+    d = terraform_directory()
+    r = subprocess.run(
+        ["terraform", "destroy", "-auto-approve"],
+        cwd=d,
+        check=False,
+    )
+    if r.returncode != 0:
+        sys.exit(r.returncode)
 
 
 def render(cfg: PlatformConfig) -> str:
@@ -63,6 +92,15 @@ def render(cfg: PlatformConfig) -> str:
 
     if eks and eks.node_desired_size is not None:
         add("node_desired_size", hcl.number(eks.node_desired_size))
+
+    # --- Vault (same Terraform module; pocket vault install / apply) ---
+    v = cfg.platform.vault
+    vault_on = True if v is None else (v.enabled if v.enabled is not None else True)
+    add("vault_enabled", hcl.boolean(vault_on))
+    if v and v.replicas is not None:
+        add("vault_replicas", hcl.number(v.replicas))
+    if v and v.data_storage_size:
+        add("vault_data_storage_size", hcl.string(v.data_storage_size))
 
     return "\n".join(lines).rstrip() + "\n"
 

@@ -153,6 +153,26 @@
             "default_storage_class": { "type": "string", "description": "StorageClass name apps should use." }
           }
         },
+        "vault": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "HashiCorp Vault on EKS (KMS auto-unseal + IRSA). Provisioned via the same Terraform stack as the cluster; use pocket vault install.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Provision Vault (KMS key, IAM role, Helm). Default true when omitted."
+            },
+            "replicas": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Vault StatefulSet replicas (Raft). Default 1 in Terraform."
+            },
+            "data_storage_size": {
+              "type": "string",
+              "description": "PVC size for Raft data, e.g. 10Gi."
+            }
+          }
+        },
         "gitlab": {
           "type": "object",
           "additionalProperties": false,
@@ -179,6 +199,19 @@
             "route53_zone_id": {
               "type": "string",
               "description": "Route 53 hosted zone ID (e.g. Z1234567890ABC). When set, pocket will automatically create/update the CNAME record for hostname → NLB. Requires hostname to be set."
+            },
+            "runner": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "GitLab Runner configuration — runs CI jobs as pods inside the EKS cluster.",
+              "properties": {
+                "enabled": { "type": "boolean", "description": "Install the GitLab Runner. Defaults to true when gitlab is enabled." },
+                "concurrent": { "type": "integer", "minimum": 1, "description": "Maximum number of jobs that can run simultaneously." },
+                "job_cpu_request":    { "type": "string", "description": "CPU request per job pod, e.g. 100m." },
+                "job_memory_request": { "type": "string", "description": "Memory request per job pod, e.g. 128Mi." },
+                "job_cpu_limit":      { "type": "string", "description": "CPU limit per job pod, e.g. 500m." },
+                "job_memory_limit":   { "type": "string", "description": "Memory limit per job pod, e.g. 512Mi." }
+              }
             },
             "bootstrap": {
               "type": "object",

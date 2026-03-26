@@ -17,6 +17,8 @@ Two modes driven by platform.yaml:
 
 from __future__ import annotations
 
+import base64
+import shlex
 import subprocess
 import sys
 import time
@@ -25,6 +27,7 @@ from typing import Any
 import yaml
 
 from pocket.config import PlatformConfig
+from pocket.backends.aws.vault import read_bootstrap_root_token
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +85,8 @@ def install(cfg: PlatformConfig) -> None:
         wait=False,
     )
 
-    _echo("==> Waiting for NLB hostname (may take 2–5 min)…")
-    nlb_host = _wait_for_nlb_hostname(INGRESS_NAMESPACE, "ingress-nginx-controller", timeout=300)
+    _echo("==> Waiting for NLB address (hostname or IP — may take 3–10 min on AWS)…")
+    nlb_host = _wait_for_nlb_hostname(INGRESS_NAMESPACE, "ingress-nginx-controller", timeout=600)
 
     if gl.hostname:
         domain = gl.hostname
@@ -151,22 +154,55 @@ def get_url(cfg: PlatformConfig) -> str:
         scheme = "https" if gl.effective_tls else "http"
         return f"{scheme}://{gl.hostname}"
 
-    # Discover from the ingress service
-    result = subprocess.run(
-        ["kubectl", "get", "svc", "-n", INGRESS_NAMESPACE,
-         "ingress-nginx-controller",
-         "-o", "jsonpath={.status.loadBalancer.ingress[0].hostname}"],
-        capture_output=True, text=True,
-    )
-    nlb = result.stdout.strip()
+    # Discover from the ingress service (NLB hostname or, rarely, IP)
+    nlb = _get_load_balancer_address(INGRESS_NAMESPACE, "ingress-nginx-controller")
     if not nlb:
-        return "(NLB hostname not yet assigned — try again in a minute)"
+        return "(NLB address not yet assigned — try again in a minute)"
     return f"http://{nlb}"
 
 
 # ---------------------------------------------------------------------------
 # Helm values builders
 # ---------------------------------------------------------------------------
+
+def _build_runner_values(gl: Any) -> dict[str, Any]:
+    """Build the gitlab-runner subchart values block."""
+    runner = gl.runner if gl and gl.runner else None
+
+    # Respect explicit enabled=false; default to enabled
+    if runner and runner.enabled is False:
+        return {"install": False}
+
+    concurrent = (runner.concurrent if runner and runner.concurrent else 4)
+
+    # Per-job resource requests/limits — sensible defaults for t3.large nodes
+    cpu_req  = runner.job_cpu_request    if runner and runner.job_cpu_request    else "100m"
+    mem_req  = runner.job_memory_request if runner and runner.job_memory_request else "128Mi"
+    cpu_lim  = runner.job_cpu_limit      if runner and runner.job_cpu_limit      else "500m"
+    mem_lim  = runner.job_memory_limit   if runner and runner.job_memory_limit   else "512Mi"
+
+    runner_config = (
+        "[[runners]]\n"
+        "  [runners.kubernetes]\n"
+        f'    namespace = "{GITLAB_NAMESPACE}"\n'
+        '    image = "ubuntu:22.04"\n'
+        f'    cpu_request = "{cpu_req}"\n'
+        f'    memory_request = "{mem_req}"\n'
+        f'    cpu_limit = "{cpu_lim}"\n'
+        f'    memory_limit = "{mem_lim}"\n'
+    )
+
+    return {
+        "install": True,
+        "concurrent": concurrent,
+        "runners": {
+            "executor": "kubernetes",
+            "locked": False,
+            "tags": "",
+            "config": runner_config,
+        },
+    }
+
 
 def _build_helm_values(cfg: PlatformConfig, domain: str) -> dict[str, Any]:
     gl      = cfg.platform.gitlab
@@ -201,9 +237,8 @@ def _build_helm_values(cfg: PlatformConfig, domain: str) -> dict[str, Any]:
         # disable bundled nginx — we manage our own
         "nginx-ingress": {"enabled": False},
         "certmanager-issuer": {"email": LETSENCRYPT_EMAIL},
-        # runner and registry optional — can be enabled later
-        "gitlab-runner": {"install": False},
-        "registry":      {"enabled": False},
+        "registry": {"enabled": False},
+        "gitlab-runner": _build_runner_values(gl),
         # use smaller resource requests for non-prod
         "gitlab": {
             "webservice": {"minReplicas": 1, "maxReplicas": 2},
@@ -295,19 +330,36 @@ def _helm_upgrade(
     _run(cmd)
 
 
-def _wait_for_nlb_hostname(namespace: str, service: str, timeout: int = 180) -> str:
+def _get_load_balancer_address(namespace: str, service: str) -> str:
+    """Return the AWS LB hostname or IP from ``status.loadBalancer.ingress[0]`` (if any)."""
+    for jsonpath in (
+        "{.status.loadBalancer.ingress[0].hostname}",
+        "{.status.loadBalancer.ingress[0].ip}",
+    ):
+        result = subprocess.run(
+            ["kubectl", "get", "svc", "-n", namespace, service, "-o", f"jsonpath={jsonpath}"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and (result.stdout or "").strip():
+            return result.stdout.strip()
+    return ""
+
+
+def _wait_for_nlb_hostname(namespace: str, service: str, timeout: int = 600) -> str:
     deadline = time.time() + timeout
     while time.time() < deadline:
-        result = subprocess.run(
-            ["kubectl", "get", "svc", "-n", namespace, service,
-             "-o", "jsonpath={.status.loadBalancer.ingress[0].hostname}"],
-            capture_output=True, text=True,
-        )
-        host = result.stdout.strip()
-        if host:
-            return host
+        addr = _get_load_balancer_address(namespace, service)
+        if addr:
+            return addr
         time.sleep(10)
-    _echo("✗ Timed out waiting for NLB hostname.", error=True)
+    _echo("✗ Timed out waiting for NLB hostname or IP.", error=True)
+    _echo(
+        "Check: kubectl get svc -n "
+        + f"{namespace} {service} -o wide"
+        + "\n      kubectl describe svc -n "
+        + f"{namespace} {service}   # Events / pending load balancer"
+    )
     sys.exit(1)
 
 
@@ -334,8 +386,45 @@ def _print_access_info(cfg: PlatformConfig, domain: str) -> None:
     _echo("=== GitLab access ===")
     _echo(f"URL:      {url}")
     _echo("User:     root")
-    _echo("Password: kubectl get secret -n gitlab gitlab-gitlab-initial-root-password "
-          "-o jsonpath='{.data.password}' | base64 -d")
+
+    pwd = _wait_gitlab_initial_password(timeout=300)
+    if not pwd:
+        _echo(
+            "Password: (Kubernetes secret not ready yet — GitLab may still be creating it.) "
+            "Retry:"
+        )
+        _echo(
+            "  kubectl get secret -n gitlab gitlab-gitlab-initial-root-password "
+            "-o jsonpath='{.data.password}' | base64 -d"
+        )
+        if gl and gl.hostname and not use_tls:
+            _echo(f"\nNote: CNAME {gl.hostname} → {domain} in your DNS provider")
+        return
+
+    vtok = read_bootstrap_root_token()
+    if vtok and _write_gitlab_credentials_to_vault(url, pwd, vtok):
+        _echo(
+            "Password: stored in Vault KV v2 at path `secret/gitlab` "
+            "(keys: `root_password`, `url`)."
+        )
+        _echo("          Read: pocket vault port-forward  →  then in another shell:")
+        _echo(
+            '            eval "$(pocket vault token --export)" && export VAULT_ADDR=http://127.0.0.1:8200 '
+            "&& vault kv get secret/gitlab"
+        )
+    else:
+        if not vtok:
+            _echo(
+                "Password: Vault bootstrap token not found "
+                "(run pocket vault init after Vault is up). Retrieve from Kubernetes:"
+            )
+        else:
+            _echo("Password: could not write to Vault — retrieve from Kubernetes:")
+        _echo(
+            "  kubectl get secret -n gitlab gitlab-gitlab-initial-root-password "
+            "-o jsonpath='{.data.password}' | base64 -d"
+        )
+
     if gl and gl.hostname and not use_tls:
         _echo(f"\nNote: CNAME {gl.hostname} → {domain} in your DNS provider")
 
@@ -382,9 +471,56 @@ def _install_selfsigned_issuer() -> None:
     })
 
 
+def _wait_gitlab_initial_password(timeout: int = 300) -> str:
+    """Poll until GitLab exposes the initial root password secret (Helm release name `gitlab`)."""
+    secret_name = "gitlab-gitlab-initial-root-password"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = subprocess.run(
+            [
+                "kubectl",
+                "get",
+                "secret",
+                "-n",
+                GITLAB_NAMESPACE,
+                secret_name,
+                "-o",
+                "jsonpath={.data.password}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0 and (result.stdout or "").strip():
+            try:
+                return base64.b64decode(result.stdout.strip()).decode()
+            except (ValueError, UnicodeDecodeError):
+                pass
+        time.sleep(5)
+    return ""
+
+
+def _write_gitlab_credentials_to_vault(gitlab_url: str, root_password: str, vault_token: str) -> bool:
+    """Store GitLab URL and initial root password in KV v2 at ``secret/gitlab``."""
+    script = f"""set -e
+export VAULT_ADDR=http://127.0.0.1:8200
+export VAULT_TOKEN={shlex.quote(vault_token)}
+vault kv put secret/gitlab root_password={shlex.quote(root_password)} url={shlex.quote(gitlab_url)}
+"""
+    result = subprocess.run(
+        ["kubectl", "exec", "-n", "vault", "vault-0", "--", "sh", "-c", script],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        err = (result.stderr or result.stdout or "").strip()
+        if err:
+            _echo(f"⚠  Vault write failed: {err}", error=False)
+        return False
+    return True
+
+
 def _print_ca_cert() -> None:
     """Extract the self-signed CA cert and save it locally for browser import."""
-    import base64
     import pathlib
 
     result = subprocess.run(

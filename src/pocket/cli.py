@@ -6,6 +6,7 @@ Usage:
     pocket --config platform.yaml plan
     pocket --config platform.yaml apply [--run]
     pocket --config platform.yaml destroy
+    pocket --config platform.yaml vault plan|install|init|token|status|bootstrap|port-forward
 """
 
 from __future__ import annotations
@@ -20,9 +21,23 @@ from pocket.config import ConfigError, load, PlatformConfig
 from pocket.backends.aws import vanilla as vanilla_backend
 from pocket.backends.aws import eks as eks_backend
 from pocket.backends.aws import gitlab as gitlab_backend
+from pocket.backends.aws import vault as vault_backend
 
 # Repo root is three levels above this file (src/pocket/cli.py → repo root)
 _REPO_ROOT = pathlib.Path(__file__).parent.parent.parent.resolve()
+
+
+def _resolve_config_path(config: pathlib.Path) -> pathlib.Path:
+    """Resolve a relative config path: try cwd, then each ancestor (repo-root platform.yaml from subdirs)."""
+    p = pathlib.Path(config).expanduser()
+    if p.is_absolute():
+        return p.resolve()
+    cwd = pathlib.Path.cwd()
+    for base in [cwd, *cwd.parents]:
+        candidate = (base / p).resolve()
+        if candidate.exists():
+            return candidate
+    return (cwd / p).resolve()
 
 _EXAMPLES_DIR = (
     pathlib.Path(__file__).parent.parent.parent
@@ -62,7 +77,7 @@ _MAKE_TARGETS = {
 def main(ctx: click.Context, config: pathlib.Path) -> None:
     """pocket — materialise Terraform and Ansible configs from platform.yaml."""
     ctx.ensure_object(dict)
-    ctx.obj["config_path"] = config
+    ctx.obj["config_path"] = _resolve_config_path(config)
 
 
 # ---------------------------------------------------------------------------
@@ -162,11 +177,16 @@ def plan(ctx: click.Context) -> None:
     "--run", "run_infra",
     is_flag=True,
     default=False,
-    help="After writing tfvars, also run the Terraform infra make target.",
+    help="After writing tfvars, run Terraform (EKS: init+apply in-repo; vanilla: make infra).",
 )
 @click.pass_context
 def apply(ctx: click.Context, run_infra: bool) -> None:
-    """Render and write terraform.tfvars; optionally provision infra."""
+    """Render and write terraform.tfvars; optionally provision infra.
+
+    **eks:** `--run` runs `terraform init` and `terraform apply` under
+    `providers/aws/eks/terraform` (cluster, CSI, gp3, Vault — no make).
+    **vanilla:** `--run` runs `make infra`.
+    """
     cfg = _load_or_exit(ctx)
     rendered, dest = _render(cfg)
 
@@ -175,8 +195,14 @@ def apply(ctx: click.Context, run_infra: bool) -> None:
     click.echo(click.style(f"✓ Wrote {dest}", fg="green"))
 
     if run_infra:
-        target = _make_target(cfg, "apply")
-        _run_make(target)
+        if cfg.kubernetes.backend == "eks":
+            click.echo(
+                click.style("==> terraform init && apply (EKS + Vault + CSI)", fg="cyan")
+            )
+            eks_backend.run_terraform_init_apply()
+        else:
+            target = _make_target(cfg, "apply")
+            _run_make(target)
 
 
 # ---------------------------------------------------------------------------
@@ -187,10 +213,19 @@ def apply(ctx: click.Context, run_infra: bool) -> None:
 @click.confirmation_option(prompt="This will destroy infrastructure. Are you sure?")
 @click.pass_context
 def destroy(ctx: click.Context) -> None:
-    """Destroy infrastructure (runs the appropriate make destroy target)."""
+    """Destroy infrastructure (writes tfvars first, then Terraform or make)."""
     cfg = _load_or_exit(ctx)
-    target = _make_target(cfg, "destroy")
-    _run_make(target)
+    rendered, dest = _render(cfg)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(rendered)
+    click.echo(click.style(f"✓ Wrote {dest}", fg="green"))
+
+    if cfg.kubernetes.backend == "eks":
+        click.echo(click.style("==> terraform destroy (EKS stack)", fg="cyan"))
+        eks_backend.run_terraform_destroy()
+    else:
+        target = _make_target(cfg, "destroy")
+        _run_make(target)
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +268,93 @@ def gitlab_uninstall(ctx: click.Context) -> None:
     """Uninstall GitLab and the ingress controller from the cluster."""
     cfg = _load_or_exit(ctx)
     gitlab_backend.uninstall(cfg)
+
+
+# ---------------------------------------------------------------------------
+# vault (EKS — KMS + IRSA + Helm via Terraform)
+# ---------------------------------------------------------------------------
+
+@main.group()
+@click.pass_context
+def vault(ctx: click.Context) -> None:
+    """HashiCorp Vault on EKS (same Terraform stack as the cluster)."""
+    pass
+
+
+@vault.command("plan")
+@click.pass_context
+def vault_plan(ctx: click.Context) -> None:
+    """Run terraform plan for the EKS directory (includes Vault when enabled)."""
+    cfg = _load_or_exit(ctx)
+    vault_backend.plan(cfg)
+
+
+@vault.command("install")
+@click.pass_context
+def vault_install(ctx: click.Context) -> None:
+    """Write terraform.tfvars and terraform apply (Vault is part of the EKS state)."""
+    cfg = _load_or_exit(ctx)
+    vault_backend.install(cfg)
+
+
+@vault.command("init")
+@click.pass_context
+def vault_init(ctx: click.Context) -> None:
+    """One-time: vault operator init (JSON) and store root token + recovery keys in a Secret."""
+    cfg = _load_or_exit(ctx)
+    vault_backend.operator_init(cfg)
+
+
+@vault.command("token")
+@click.option(
+    "--export",
+    "shell_export",
+    is_flag=True,
+    help="Print export VAULT_TOKEN=… suitable for eval.",
+)
+@click.option(
+    "--raw",
+    "raw_token",
+    is_flag=True,
+    help="Print the root token only (for scripts; avoid in shared logs).",
+)
+@click.pass_context
+def vault_token(ctx: click.Context, shell_export: bool, raw_token: bool) -> None:
+    """Show where the root token is, or print it (--export / --raw)."""
+    cfg = _load_or_exit(ctx)
+    if shell_export and raw_token:
+        click.echo(click.style("✗ Use either --export or --raw, not both.", fg="red"), err=True)
+        sys.exit(1)
+    if shell_export:
+        vault_backend.token_export(cfg)
+    elif raw_token:
+        vault_backend.token_show(cfg)
+    else:
+        vault_backend.token_info(cfg)
+
+
+@vault.command("status")
+@click.pass_context
+def vault_status(ctx: click.Context) -> None:
+    """Show vault status from the vault-0 pod."""
+    cfg = _load_or_exit(ctx)
+    vault_backend.status(cfg)
+
+
+@vault.command("bootstrap")
+@click.pass_context
+def vault_bootstrap(ctx: click.Context) -> None:
+    """Configure Vault Kubernetes auth for External Secrets (VAULT_TOKEN or bootstrap Secret)."""
+    cfg = _load_or_exit(ctx)
+    vault_backend.bootstrap(cfg)
+
+
+@vault.command("port-forward")
+@click.pass_context
+def vault_port_forward(ctx: click.Context) -> None:
+    """Forward Vault to http://127.0.0.1:8200 (blocks until Ctrl+C)."""
+    cfg = _load_or_exit(ctx)
+    vault_backend.port_forward(cfg)
 
 
 # ---------------------------------------------------------------------------

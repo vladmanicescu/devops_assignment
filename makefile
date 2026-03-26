@@ -1,5 +1,8 @@
 PYTHON_VERSION=$(shell python3 -c "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')")
 
+# pocket CLI (after: make dev-setup && source .venv/bin/activate)
+POCKET ?= .venv/bin/pocket
+
 TERRAFORM_DIR=providers/aws/vanilla/terraform
 ANSIBLE_DIR=providers/aws/vanilla/ansible
 EKS_TERRAFORM_DIR=providers/aws/eks/terraform
@@ -81,11 +84,17 @@ validate:
 	cd $(TERRAFORM_DIR) && terraform validate
 
 infra-eks:
-	@echo "==> Provisioning EKS (providers/aws/eks/terraform)"
+	@echo "==> Writing terraform.tfvars from platform.yaml (EKS + Vault + node settings)"
+	@test -x $(POCKET) || (echo "Run: make dev-setup  (then use $(POCKET) or activate .venv)" && exit 1)
+	$(POCKET) apply --config platform.yaml
+	@echo "==> Terraform apply: EKS cluster, VPC, EBS CSI, gp3, Vault (if platform.vault.enabled)"
 	cd $(EKS_TERRAFORM_DIR) && terraform init
 	cd $(EKS_TERRAFORM_DIR) && terraform apply -auto-approve
 
 destroy-eks:
+	@echo "==> Writing terraform.tfvars from platform.yaml (must match the stack you destroy)"
+	@test -x $(POCKET) || (echo "Run: make dev-setup" && exit 1)
+	$(POCKET) apply --config platform.yaml
 	@echo "==> Destroying EKS stack"
 	cd $(EKS_TERRAFORM_DIR) && terraform destroy -auto-approve
 
