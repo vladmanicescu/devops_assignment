@@ -47,3 +47,9 @@ kubeconfig
 
 # Local configs
 *.local
+
+# Generated Terraform variables (use platform.yaml + pocket; keep *.tfvars.example)
+**/terraform.tfvars
+
+# Local notes with credentials — never commit
+terraform_login
