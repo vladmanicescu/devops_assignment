@@ -6,7 +6,7 @@
 
   vars:
     adm_user: adm
-    private_key_path: "../terraform/k8s-assignment-key.pem"
+    private_key_path: "../terraform/k8s-pocket-key.pem"
 
   pre_tasks:
     - name: Install required packages

@@ -1,0 +1,76 @@
+# Example PlatformConfig — current AWS + kubeadm + NFS + GitLab Omnibus shape.
+# Validate against platform/schema/v1/platform-config.schema.json (JSON Schema draft 2020-12).
+
+apiVersion: platform.dev/v1
+kind: PlatformConfig
+
+metadata:
+  name: pocket
+  environment: lab
+  labels:
+    team: platform
+
+provider: aws
+
+kubernetes:
+  backend: vanilla
+  version: "1.33"
+  network:
+    vpc_cidr: 172.31.0.0/16
+    subnet_cidr: 172.31.1.0/24
+    availability_zone: eu-central-1a
+  aws:
+    region: eu-central-1
+    profile: default
+    vanilla:
+      key_name: k8s-pocket-key
+      instance_type: t3.medium
+      allowed_ssh_cidrs:
+        - 0.0.0.0/0
+      nodes:
+        - name: k8s-cp1
+          hostname: k8s-cp1
+          private_ip: 172.31.1.11
+          gateway: 172.31.1.1
+          extra_disk_size: 3
+        - name: k8s-w1
+          hostname: k8s-w1
+          private_ip: 172.31.1.12
+          gateway: 172.31.1.1
+          extra_disk_size: 3
+        - name: k8s-w2
+          hostname: k8s-w2
+          private_ip: 172.31.1.13
+          gateway: 172.31.1.1
+          extra_disk_size: 3
+      nfs_instance:
+        private_ip: 172.31.1.20
+        instance_type: t3.medium
+        root_volume_gb: 30
+      gitlab_instance:
+        private_ip: 172.31.1.30
+        instance_type: t3.large
+        root_volume_gb: 50
+
+platform:
+  ingress:
+    class: nginx
+  storage:
+    nfs:
+      enabled: true
+      server_host: 172.31.1.20
+      export_path: /srv/nfs/k8s
+    default_storage_class: nfs-client
+  gitlab:
+    enabled: true
+    install_mode: omnibus_vm
+    bootstrap:
+      enabled: true
+      projects:
+        - python-auth-app
+        - python-auth-k8s
+  applications:
+    - name: python-auth
+      namespace: default
+      chart: app/python-auth-k8s
+      values_file: app/python-auth-k8s/values.yaml
