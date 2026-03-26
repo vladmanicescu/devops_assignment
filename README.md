@@ -1,6 +1,15 @@
 
+# devops_assignment (pocket)
 
+**pocket** is a small CLI plus Terraform layouts to provision **AWS EKS** (or vanilla EC2-based Kubernetes), optional **HashiCorp Vault**, **External Secrets**, **GitLab** (Helm), and related pieces from a single **`platform.yaml`**.
 
+- **License:** [MIT](LICENSE)
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
+- **Security:** [SECURITY.md](SECURITY.md)
+
+EKS-focused docs: [`providers/aws/eks/README.md`](providers/aws/eks/README.md).
+
+---
 
 # Makefile Targets Documentation
 
